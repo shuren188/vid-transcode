@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from vid_transcode.transcoder import VideoInfo
+from vid_transcode import __version__
 
 # Paths
 UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploads"
@@ -133,6 +134,11 @@ async def _run_transcode(job_id: str) -> None:
 
 
 router = APIRouter(prefix="/api")
+
+
+@router.get("/version")
+def get_version():
+    return {"version": __version__}
 
 
 @router.get("/resolutions")

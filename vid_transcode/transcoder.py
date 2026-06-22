@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import shlex
 from pathlib import Path
 from typing import Optional
 
@@ -107,6 +108,7 @@ def transcode(
     video_bitrate: Optional[str] = None,
     audio_codec: str = "copy",
     remove_audio: bool = False,
+    dry_run: bool = False,
     overwrite: bool = False,
 ) -> subprocess.CompletedProcess:
     """Transcode a video file with the given parameters.
@@ -122,6 +124,7 @@ def transcode(
         video_bitrate: Target video bitrate (e.g. "2M", "1000k").
         audio_codec: Audio codec ("copy", "aac", "mp3", or "none").
         remove_audio: Remove all audio streams.
+        dry_run: Print the ffmpeg command without executing.
         overwrite: Overwrite output file if it exists.
     """
     cmd = ["ffmpeg", "-i", str(input_path)]
@@ -162,4 +165,8 @@ def transcode(
 
     cmd.append(str(output_path))
 
+
+    if dry_run:
+        print(" ".join(shlex.quote(str(part)) for part in cmd))
+        return subprocess.CompletedProcess(cmd, 0)
     return subprocess.run(cmd, check=True)

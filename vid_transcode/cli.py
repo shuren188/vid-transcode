@@ -110,6 +110,9 @@ def convert(
     overwrite: bool = typer.Option(
         False, "-y", "--yes", help="Overwrite output files without asking"
     ),
+    dry_run: bool = typer.Option(
+        False, "-n", "--dry-run", help="Print the ffmpeg command without executing"
+    ),
 ) -> None:
     """Transcode video files with specified parameters."""
     paths = _resolve_paths(input)
@@ -147,6 +150,7 @@ def convert(
                     audio_codec=audio_codec,
                     remove_audio=remove_audio,
                     overwrite=overwrite,
+                    dry_run=dry_run,
                 )
             except Exception as e:
                 progress.console.print(f"[red]Error processing {p.name}: {e}[/]")

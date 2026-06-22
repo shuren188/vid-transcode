@@ -79,7 +79,7 @@ async def _run_transcode(job_id: str) -> None:
     target_width = preset["width"]
 
     scale_filter = (
-        f"scale='min({target_width},iw)':min({target_height},ih)"
+        f"scale=min({target_width},iw):min({target_height},ih)"
         ":force_original_aspect_ratio=decrease"
     )
 
@@ -118,7 +118,7 @@ async def _run_transcode(job_id: str) -> None:
         await proc.wait()
         if proc.returncode != 0:
             stderr_out = (await proc.stderr.read()).decode("utf-8", errors="replace")
-            raise subprocess.CalledProcessError(proc.returncode, cmd, stderr=stderr_out)
+            raise RuntimeError(f"FFmpeg error (exit {proc.returncode}):\n{stderr_out[-2000:]}")
         job["status"] = "completed"
         job["progress"] = 100.0
         job["completed_at"] = datetime.now(timezone.utc).isoformat()

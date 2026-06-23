@@ -78,19 +78,29 @@ async def _run_transcode(job_id: str) -> None:
     output_path = job["output_path"]
     total_duration = job.get("total_duration", 0.0)
 
-    # ── 第一版原始编码参数 ──
-    # 还原最简libx264编码，不加任何多余参数
+    # ── 拼多多兼容编码参数 ──
+    # 行车记录仪视频常见问题: 非正方形像素(SAR≠1)、可变帧率(VFR)、GPS元数据
+    # 拼多多转码服务器无法处理这些，必须标准化。
+    vf = "fps=30,scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1"
     cmd = [
         "ffmpeg", "-y",
         "-i", str(input_path),
+        # ── 视频 ──
         "-c:v", "libx264",
         "-preset", "fast",
         "-crf", "23",
         "-threads", "2",
+        "-vf", vf,
         "-pix_fmt", "yuv420p",
         "-movflags", "+faststart",
+        # ── 音频 ──
         "-c:a", "aac",
         "-b:a", "128k",
+        "-ar", "44100",
+        # ── 清除元数据（GPS等会干扰拼多多转码） ──
+        "-map_metadata", "-1",
+        "-map_chapters", "-1",
+        # ── 进度 ──
         "-progress", "pipe:1",
         "-nostats",
         str(output_path),

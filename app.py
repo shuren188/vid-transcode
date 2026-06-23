@@ -29,7 +29,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(
     title="vid-transcode",
     description="Video transcoding web app - convert videos to H.264 MP4",
-    version="0.1.8",
+    version="0.2.0",
     lifespan=lifespan,
 )
 

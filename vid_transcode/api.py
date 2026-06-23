@@ -102,8 +102,9 @@ async def _run_transcode(job_id: str) -> None:
         "-c:v", "libx264",
         "-profile:v", "high",
         "-level:v", h264_level,
-        "-preset", "medium",
+        "-preset", "veryfast",
         "-crf", "23",
+        "-threads", "2",
         "-vf", scale_filter,
         "-pix_fmt", "yuv420p",
         "-colorspace", "bt709",
@@ -111,6 +112,7 @@ async def _run_transcode(job_id: str) -> None:
         "-color_trc", "bt709",
         "-color_range", "tv",
         "-movflags", "+faststart",
+        "-max_muxing_queue_size", "1024",
         "-tag:v", "avc1",
         # ── Strip metadata & chapters ──
         "-map_metadata", "-1",

@@ -78,21 +78,18 @@ async def _run_transcode(job_id: str) -> None:
     output_path = job["output_path"]
     total_duration = job.get("total_duration", 0.0)
 
-    # ── 千牛兼容 AVI 编码 ──
-    # H.264 MP4 被千牛转码服务器拒绝，改用 AVI 容器 + MJPEG
-    # MJPEG 是最广泛兼容的视频编码，任何转码器都能处理。
-    vf = "fps=30,scale=trunc(iw/2)*2:trunc(ih/2)*2"
+    # ── 第一版原始转码命令 ──
+    # 还原初始版本的最简编码参数，去掉了所有后来加的参数
     cmd = [
         "ffmpeg", "-y",
         "-i", str(input_path),
-        "-c:v", "mjpeg",
-        "-q:v", "5",
-        "-vf", vf,
-        "-c:a", "pcm_s16le",
-        "-ar", "48000",
-        "-ac", "2",
-        "-map_metadata", "-1",
-        "-map_chapters", "-1",
+        "-c:v", "libx264",
+        "-preset", "medium",
+        "-crf", "23",
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+        "-c:a", "aac",
+        "-b:a", "128k",
         "-progress", "pipe:1",
         "-nostats",
         str(output_path),
@@ -182,7 +179,7 @@ async def start_transcode(req: TranscodeRequest):
         raise HTTPException(404, "Uploaded file not found")
     duration = _get_video_duration(input_path)
     job_id = str(uuid.uuid4())
-    output_path = OUTPUT_DIR / f"{job_id}.avi"
+    output_path = OUTPUT_DIR / f"{job_id}.mp4"
     job = {
         "job_id": job_id, "status": "pending", "progress": 0.0,
         "input_name": input_path.name,
@@ -214,8 +211,8 @@ def download_file(job_id: str):
     if not output_path.exists():
         raise HTTPException(404, "Output file not found")
     orig = Path(job["input_name"])
-    download_name = f"{orig.stem}.avi"
-    return FileResponse(path=output_path, filename=download_name, media_type="video/avi")
+    download_name = f"{orig.stem}_h264.mp4"
+    return FileResponse(path=output_path, filename=download_name, media_type="video/mp4")
 
 
 async def cleanup_task_runner() -> None:

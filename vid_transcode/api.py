@@ -79,8 +79,9 @@ async def _run_transcode(job_id: str) -> None:
     target_height = preset["height"]
     target_width = preset["width"]
 
+    bs = "\\"
     scale_filter = (
-        f"scale=min({target_width},iw):min({target_height},ih)"
+        f"scale=min({target_width}{bs},iw):min({target_height}{bs},ih)"
         ":force_original_aspect_ratio=decrease"
     )
 

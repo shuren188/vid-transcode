@@ -84,25 +84,27 @@ async def _run_transcode(job_id: str) -> None:
     # 3. setsar=1 — 正方形像素
     vf = "fps=30,scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1"
 
-    # ── 极高画质编码，确保码率远超千牛要求 ──
-    # CRF模式对静态内容用非~30Kbps。CRF 1接近无损，码率极高。
+    # ── 千牛兼容 H.264 编码 ──
+    # 使用最标准参数产生100%兼容MP4
+    scale_filter = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
+    vf = "fps=30,scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1"
     cmd = [
         "ffmpeg", "-y",
         "-i", str(input_path),
         "-c:v", "libx264",
         "-profile:v", "high",
         "-level:v", "4.0",
-        "-preset", "fast",
-        "-crf", "1",
+        "-preset", "medium",
+        "-crf", "18",
         "-threads", "2",
         "-vf", vf,
         "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
         "-tag:v", "avc1",
         "-c:a", "aac",
-        "-ar", "44100",
+        "-ar", "48000",
         "-ac", "2",
         "-b:a", "128k",
-        "-movflags", "+faststart",
         "-map_metadata", "-1",
         "-map_chapters", "-1",
         "-progress", "pipe:1",

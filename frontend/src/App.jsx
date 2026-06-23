@@ -179,7 +179,7 @@ export default function App() {
           </section>
         )}
       </main>
-      <footer className="footer"><p>vid-transcode v0.2.0 &#183; &#22522;&#20110; FFmpeg &#183; H.264 / AVC</p></footer>
+      <footer className="footer"><p>vid-transcode v0.2.1 &#183; &#22522;&#20110; FFmpeg &#183; H.264 / AVC</p></footer>
     </div>
   );
 }

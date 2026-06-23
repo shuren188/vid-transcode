@@ -78,28 +78,52 @@ async def _run_transcode(job_id: str) -> None:
     output_path = job["output_path"]
     total_duration = job.get("total_duration", 0.0)
 
-    # ── 拼多多兼容编码参数 ──
-    # 行车记录仪视频常见问题: 非正方形像素(SAR≠1)、可变帧率(VFR)、GPS元数据
-    # 拼多多转码服务器无法处理这些，必须标准化。
-    vf = "fps=30,scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1"
+    # ── 拼多多兼容编码（全面修复）──
+    # 行车记录仪/摄像头视频导致拼多多转码失败的原因:
+    # 1. 分辨率>1080p → 拼多多解码器不支持
+    # 2. H.264 Level过高(>4.0) → 拼多多旧版本FFmpeg不兼容
+    # 3. x264 SEI元数据 → 部分平台拒绝含x264标识的视频
+    # 4. 非标像素宽高比(SAR≠1) → DAR计算错误
+    # 5. 可变帧率(VFR) → 时间戳异常
+    # 6. GPS/品牌元数据 → 非标准数据
+    #
+    # 剪映导出的视频可以上传，原因:
+    # - 限制分辨率≤1080p
+    # - 使用标准Level 4.0
+    # - 无SEI/usertag数据
+    #
+    # 解决策略: 全面标准化
+    target_w = 1920
+    target_h = 1080
+    # FFmpeg v5.x: min()内的逗号必须转义
+    scale = f"scale=min({target_w}\\,iw):min({target_h}\\,ih)"
+    vf = (
+        f"fps=30,"
+        f"{scale}:force_original_aspect_ratio=decrease,"
+        "scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1"
+    )
     cmd = [
         "ffmpeg", "-y",
         "-i", str(input_path),
         # ── 视频 ──
         "-c:v", "libx264",
+        "-profile:v", "main",
+        "-level:v", "4.0",
         "-preset", "fast",
         "-crf", "23",
         "-threads", "2",
         "-vf", vf,
         "-pix_fmt", "yuv420p",
         "-movflags", "+faststart",
+        # ── 清理x264 SEI和元数据 ──
+        "-bsf:v", "filter_units=remove_types=6",   # 移除SEI NAL单元(含x264标识)
+        "-map_metadata", "-1",
+        "-map_chapters", "-1",
         # ── 音频 ──
         "-c:a", "aac",
         "-b:a", "128k",
         "-ar", "44100",
-        # ── 清除元数据（GPS等会干扰拼多多转码） ──
-        "-map_metadata", "-1",
-        "-map_chapters", "-1",
+        "-ac", "2",
         # ── 进度 ──
         "-progress", "pipe:1",
         "-nostats",

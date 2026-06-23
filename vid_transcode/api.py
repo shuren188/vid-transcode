@@ -121,9 +121,6 @@ async def _run_transcode(job_id: str) -> None:
         # ── Strip metadata & chapters ──
         "-map_metadata", "-1",
         "-map_chapters", "-1",
-        # ── Clean timeline (no +genpts — creates edit lists
-        # that some platforms, including 千牛, reject) ──
-        "-avoid_negative_ts", "make_zero",
         # ── GOP / keyframe settings ──
         "-g", "48",
         "-keyint_min", "12",

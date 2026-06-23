@@ -35,6 +35,9 @@ export default function App() {
   const [progress, setProgress] = useState(0);
   const [outputName, setOutputName] = useState(null);
   const [outputSize, setOutputSize] = useState(null);
+const [outputCodec, setOutputCodec] = useState(null);
+const [outputWidth, setOutputWidth] = useState(null);
+const [outputHeight, setOutputHeight] = useState(null);
   const [errorMsg, setErrorMsg] = useState("");
   const pollRef = useRef(null);
   const inputRef = useRef(null);
@@ -176,7 +179,8 @@ export default function App() {
           <section className="done-section">
             <div className="done-icon"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="24" cy="24" r="20" /><polyline points="16 24 22 30 33 19" /></svg></div>
             <h2 className="section-title done-title">&#36716;&#30721;&#23436;&#25104;</h2>
-            <div className="done-info"><span>{outputName}</span>{outputSize && <span className="done-size">{formatSize(outputSize)}</span>}</div>
+            <div className="done-info"><span>{outputName}</span>{outputSize && <span className="done-size">{formatSize(outputSize)}</span>}
+            {outputCodec && <span className="done-meta">{outputCodec.toUpperCase()} · {outputWidth}×{outputHeight}</span>}</div>
             <div className="done-actions">
               <button className="btn-primary btn-download" onClick={handleDownload}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>

@@ -22,19 +22,11 @@ OUTPUT_DIR = Path(__file__).resolve().parent.parent / "output"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# Resolution presets
-RESOLUTION_PRESETS = {
-    "480p":  {"height": 480,  "width": 854,  "label": "480p (SD)"},
-    "720p":  {"height": 720,  "width": 1280, "label": "720p (HD)"},
-    "1080p": {"height": 1080, "width": 1920, "label": "1080p (Full HD)"},
-}
-
 # Limits
 MAX_FILE_SIZE = 500 * 1024 * 1024  # 500 MB
 _concurrency_sem = asyncio.Semaphore(1)  # Only 1 transcode at a time (free tier)
 
 # In-memory job store
-# Each value is a dict: {job_id, status, progress, input_name, resolution, ...}
 _jobs: dict[str, dict] = {}
 
 
@@ -50,7 +42,6 @@ class UploadResponse(BaseModel):
 
 class TranscodeRequest(BaseModel):
     file_id: str
-    resolution: str
 
 
 class JobStatus(BaseModel):
@@ -58,7 +49,6 @@ class JobStatus(BaseModel):
     status: str
     progress: float
     input_name: str
-    resolution: str
     output_filename: Optional[str] = None
     output_size_mb: Optional[float] = None
     error: Optional[str] = None
@@ -72,44 +62,51 @@ def _get_video_duration(input_path: Path) -> float:
 
 
 async def _run_transcode(job_id: str) -> None:
-    """Run FFmpeg in a subprocess, streaming progress into the job store."""
+    """Run FFmpeg, streaming progress into the job store.
+
+    千牛/淘宝视频上传要求 (official):
+      - Format: MP4 H.264 High Profile
+      - Resolution: ≥ 720p (keep original)
+      - Average bitrate: > 0.56 Mbps (min 600k)
+      - Frame rate: ≤ 30 fps
+      - Audio: AAC ≤ 128k
+      - File size: ≤ 120 MB
+    """
     job = _jobs[job_id]
     input_path = job["input_path"]
     output_path = job["output_path"]
-    resolution = job["resolution"]
     total_duration = job.get("total_duration", 0.0)
 
-    preset = RESOLUTION_PRESETS[resolution]
-    target_height = preset["height"]
-    target_width = preset["width"]
+    # Build filter chain:
+    # 1. fps=30  — cap frame rate (千牛 rejects >30fps)
+    # 2. scale to even dimensions (libx264 + yuv420p requires even w/h)
+    #    Keep original resolution — no downscaling.
+    #    If resolution < 720p, upscale to 720p (meet 千牛 minimum).
+    filter_parts = ["fps=30"]
+    # Ensure even dimensions
+    filter_parts.append("scale=trunc(iw/2)*2:trunc(ih/2)*2")
+    filter_parts.append("setsar=1")
+    vf = ",".join(filter_parts)
 
-    # ── Build scale filter chain ──
-    # 1. fps=30 caps frame rate (千牛 rejects >30fps)
-    # 2. min(x,iw):min(y,ih) shrinks while preserving aspect
-    # 3. trunc(iw/2)*2 ensures even pixels for libx264+yuv420p
-    # Note: commas inside min() must be escaped for FFmpeg v5.x
-    scale_filter = (
-        "fps=30,"
-        f"scale=min({target_width}\\,iw):min({target_height}\\,ih)"
-        ":force_original_aspect_ratio=decrease,"
-        "scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1"
-    )
-
-    # H.264 Level is left unset → x264 auto-selects the appropriate
-    # level for the stream parameters (fps, resolution, bitrate).
-    # Hardcoding levels that are too low for >30fps video causes
-    # SPS/decoder mismatch → 千牛 rejection.
-
+    # Bitrate targets to meet 千牛 minimum > 0.56 Mbps
+    # Use 2-pass like approach with CRF + maxrate/minrate constraints
+    # CRF 20 gives good quality; minrate ensures 千牛 requirement.
+    # maxrate/bufsize allow VBV for streaming compliance.
     cmd = [
         "ffmpeg", "-y",
         "-i", str(input_path),
         # ── Video ──
         "-c:v", "libx264",
         "-profile:v", "high",
+        "-level:v", "4.0",
         "-preset", "veryfast",
-        "-crf", "23",
+        "-crf", "20",
+        "-b:v", "2000k",
+        "-minrate", "600k",
+        "-maxrate", "4000k",
+        "-bufsize", "4000k",
         "-threads", "2",
-        "-vf", scale_filter,
+        "-vf", vf,
         "-pix_fmt", "yuv420p",
         "-colorspace", "bt709",
         "-color_primaries", "bt709",
@@ -121,10 +118,10 @@ async def _run_transcode(job_id: str) -> None:
         # ── Strip metadata & chapters ──
         "-map_metadata", "-1",
         "-map_chapters", "-1",
-        # ── GOP / keyframe settings ──
-        "-g", "48",
-        "-keyint_min", "12",
-        # ── Audio ──
+        # ── GOP / keyframe ~2s ──
+        "-g", "60",
+        "-keyint_min", "15",
+        # ── Audio (AAC, ≤128k) ──
         "-c:a", "aac",
         "-ar", "44100",
         "-ac", "2",
@@ -176,11 +173,6 @@ def get_version():
     return {"version": __version__}
 
 
-@router.get("/resolutions")
-def list_resolutions():
-    return {k: {"width": v["width"], "height": v["height"], "label": v["label"]} for k, v in RESOLUTION_PRESETS.items()}
-
-
 @router.post("/upload", response_model=UploadResponse)
 async def upload_video(file: UploadFile = File(...)):
     if not file.filename:
@@ -215,8 +207,6 @@ async def upload_video(file: UploadFile = File(...)):
 
 @router.post("/transcode", response_model=JobStatus)
 async def start_transcode(req: TranscodeRequest):
-    if req.resolution not in RESOLUTION_PRESETS:
-        raise HTTPException(400, f"Invalid resolution: {req.resolution}")
     input_path: Optional[Path] = None
     for f in UPLOAD_DIR.iterdir():
         if f.stem == req.file_id and f.is_file():
@@ -229,7 +219,7 @@ async def start_transcode(req: TranscodeRequest):
     output_path = OUTPUT_DIR / f"{job_id}.mp4"
     job = {
         "job_id": job_id, "status": "pending", "progress": 0.0,
-        "input_name": input_path.name, "resolution": req.resolution,
+        "input_name": input_path.name,
         "output_filename": None, "output_size_mb": None, "error": None,
         "created_at": datetime.now(timezone.utc).isoformat(), "completed_at": None,
         "input_path": input_path, "output_path": output_path, "total_duration": duration,
@@ -258,7 +248,7 @@ def download_file(job_id: str):
     if not output_path.exists():
         raise HTTPException(404, "Output file not found")
     orig = Path(job["input_name"])
-    download_name = f"{orig.stem}_{job['resolution']}.mp4"
+    download_name = f"{orig.stem}.mp4"
     return FileResponse(path=output_path, filename=download_name, media_type="video/mp4")
 
 

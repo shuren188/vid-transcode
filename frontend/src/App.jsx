@@ -3,11 +3,6 @@ import "./App.css";
 
 /* ─── Constants ─────────────────────────────────────────────── */
 const API_BASE = "/api";
-const RESOLUTIONS = [
-  { key: "480p",  width: 854,  height: 480,  label: "480p", desc: "SD · 流畅" },
-  { key: "720p",  width: 1280, height: 720,  label: "720p", desc: "HD · 清晰" },
-  { key: "1080p", width: 1920, height: 1080, label: "1080p",desc: "Full HD · 高清" },
-];
 
 /* ─── Helpers ───────────────────────────────────────────────── */
 function formatDuration(seconds) {
@@ -30,7 +25,6 @@ export default function App() {
   const [fileId, setFileId] = useState(null);
   const [fileName, setFileName] = useState("");
   const [fileInfo, setFileInfo] = useState(null);
-  const [resolution, setResolution] = useState("720p");
   const [jobId, setJobId] = useState(null);
   const [progress, setProgress] = useState(0);
   const [outputName, setOutputName] = useState(null);
@@ -62,13 +56,13 @@ export default function App() {
     try {
       const res = await fetch(`${API_BASE}/transcode`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ file_id: fileId, resolution }),
+        body: JSON.stringify({ file_id: fileId }),
       });
       if (!res.ok) { const err = await res.json(); throw new Error(err.detail || "Transcode failed"); }
       const data = await res.json();
       setJobId(data.job_id); startPolling(data.job_id);
     } catch (e) { setErrorMsg(e.message); setPhase("error"); }
-  }, [fileId, resolution]);
+  }, [fileId]);
 
   const startPolling = useCallback((id) => {
     clearInterval(pollRef.current);
@@ -92,13 +86,12 @@ export default function App() {
     if (!jobId) return;
     const a = document.createElement("a");
     a.href = `${API_BASE}/download/${jobId}`;
-    // Filename is set via server Content-Disposition header (e.g. "video_720p.mp4")
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
   }, [jobId]);
 
   const handleReset = useCallback(() => {
     clearInterval(pollRef.current); setPhase("upload"); setUploading(false);
-    setFileId(null); setFileName(""); setFileInfo(null); setResolution("720p");
+    setFileId(null); setFileName(""); setFileInfo(null);
     setJobId(null); setProgress(0); setOutputName(null); setOutputSize(null); setErrorMsg("");
   }, []);
 
@@ -142,16 +135,7 @@ export default function App() {
                 <span className="file-meta">{fileInfo.width}&#215;{fileInfo.height} &#183; {formatDuration(fileInfo.duration)} &#183; {formatSize(fileInfo.size_mb)} &#183; {fileInfo.codec || "?"}</span>
               </div>
             </div>
-            <h2 className="section-title">&#36873;&#25321;&#36755;&#20986;&#20998;&#36776;&#29575;</h2>
-            <div className="resolution-grid">
-              {RESOLUTIONS.map((r) => (
-                <button key={r.key} className={`res-card ${resolution === r.key ? "res-card--active" : ""}`} onClick={() => setResolution(r.key)}>
-                  <span className="res-label">{r.label}</span>
-                  <span className="res-desc">{r.desc}</span>
-                  <span className="res-size">{r.width}&#215;{r.height}</span>
-                </button>
-              ))}
-            </div>
+            <p className="ready-hint">&#23558;&#20197;&#21407;&#22987;&#20998;&#36776;&#29575;&#36716;&#30721;&#20026; H.264 &#65292;&#36914;&#34892;&#21315;&#29275;&#20860;&#23481;&#21319;&#32423;</p>
             <button className="btn-primary" onClick={startTranscode}>
               <span>&#24320;&#22987;&#36716;&#30721;</span>
               <svg className="btn-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3" /></svg>
@@ -161,14 +145,14 @@ export default function App() {
         {phase === "processing" && (
           <section className="progress-section">
             <div className="progress-header"><div className="progress-spinner" /><h2 className="section-title">&#36716;&#30721;&#20013;</h2></div>
-            <div className="progress-info"><span className="progress-file">{fileName}</span><span className="progress-res">{resolution}</span></div>
+            <div className="progress-info"><span className="progress-file">{fileName}</span></div>
             <div className="progress-bar-track">
               <div className="progress-bar-fill" style={{ width: `${progress}%` }} />
               <div className="progress-bar-glow" style={{ left: `${progress}%` }} />
             </div>
             <div className="progress-stats">
               <span className="progress-pct">{progress.toFixed(1)}%</span>
-              <span className="progress-hint">H.264 &#183; {resolution === "1080p" ? "&#36739;&#24930;" : "&#32422;&#38656;&#25968;&#31186;&#33267;&#25968;&#20998;&#38047;"}</span>
+              <span className="progress-hint">H.264 &#183; &#21315;&#29275;&#20860;&#23481;&#26684;&#24335;</span>
             </div>
           </section>
         )}

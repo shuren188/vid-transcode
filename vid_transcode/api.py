@@ -83,30 +83,47 @@ async def _run_transcode(job_id: str) -> None:
     # 3. setsar=1 — 正方形像素
     vf = "fps=30,scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1"
 
-    # ── 标准 H.264 编码参数（对齐剪映导出效果）──
-    cmd = [
-        "ffmpeg", "-y",
-        "-i", str(input_path),
-        # ── 视频 ──
+    # ── 通用视频/音频参数 ──
+    video_opts = [
         "-c:v", "libx264",
         "-profile:v", "high",
         "-level:v", "4.0",
-        "-preset", "medium",
-        "-crf", "18",
-        "-threads", "2",
+        "-preset", "fast",
+        "-b:v", "2000k",
         "-vf", vf,
         "-pix_fmt", "yuv420p",
-        "-movflags", "+faststart",
         "-tag:v", "avc1",
-        # ── 清理元数据 ──
-        "-map_metadata", "-1",
-        "-map_chapters", "-1",
-        # ── 音频 ──
+    ]
+    audio_opts = [
         "-c:a", "aac",
         "-ar", "44100",
         "-ac", "2",
         "-b:a", "128k",
-        # ── 进度输出 ──
+    ]
+
+    # Two-pass encoding — the only reliable way to hit a minimum
+    # average bitrate (>560 Kbps required by 千牛). CRF mode on
+    # simple/static content produces ~30 Kbps, far below the threshold.
+    pass1 = [
+        "ffmpeg", "-y",
+        "-i", str(input_path),
+        *video_opts,
+        "-threads", "2",
+        "-pass", "1",
+        "-an",
+        "-f", "null",
+        "NUL" if os.name == "nt" else "/dev/null",
+    ]
+    pass2 = [
+        "ffmpeg", "-y",
+        "-i", str(input_path),
+        *video_opts,
+        "-threads", "2",
+        "-pass", "2",
+        *audio_opts,
+        "-movflags", "+faststart",
+        "-map_metadata", "-1",
+        "-map_chapters", "-1",
         "-progress", "pipe:1",
         "-nostats",
         str(output_path),
@@ -115,8 +132,20 @@ async def _run_transcode(job_id: str) -> None:
     async with _concurrency_sem:
         try:
             job["status"] = "processing"
+
+            # ── Pass 1: analysis ──
             proc = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                *pass1, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            await proc.wait()
+            if proc.returncode != 0:
+                stderr_out = (await proc.stderr.read()).decode("utf-8", errors="replace")
+                raise RuntimeError(f"FFmpeg pass-1 error (exit {proc.returncode}):\n{stderr_out[-2000:]}")
+
+            # ── Pass 2: actual encode ──
+            job["progress"] = 10.0
+            proc = await asyncio.create_subprocess_exec(
+                *pass2, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             )
             assert proc.stdout is not None
             async for line_bytes in proc.stdout:
@@ -126,13 +155,14 @@ async def _run_transcode(job_id: str) -> None:
                         us = int(line.split("=", 1)[1])
                         elapsed_s = us / 1_000_000
                         if total_duration > 0:
-                            job["progress"] = min(round((elapsed_s / total_duration) * 100, 1), 99.9)
+                            job["progress"] = 10.0 + min(round((elapsed_s / total_duration) * 90, 1), 89.9)
                     except (ValueError, IndexError):
                         pass
             await proc.wait()
             if proc.returncode != 0:
                 stderr_out = (await proc.stderr.read()).decode("utf-8", errors="replace")
-                raise RuntimeError(f"FFmpeg error (exit {proc.returncode}):\n{stderr_out[-2000:]}")
+                raise RuntimeError(f"FFmpeg pass-2 error (exit {proc.returncode}):\n{stderr_out[-2000:]}")
+
             job["status"] = "completed"
             job["progress"] = 100.0
             job["completed_at"] = datetime.now(timezone.utc).isoformat()

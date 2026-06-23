@@ -79,9 +79,8 @@ async def _run_transcode(job_id: str) -> None:
     target_height = preset["height"]
     target_width = preset["width"]
 
-    bs = "\\"
     scale_filter = (
-        f"scale=min({target_width}{bs},iw):min({target_height}{bs},ih)"
+        f"scale=min({target_width},iw):min({target_height},ih)"
         ":force_original_aspect_ratio=decrease"
     )
 
@@ -134,11 +133,6 @@ async def _run_transcode(job_id: str) -> None:
 
 
 router = APIRouter(prefix="/api")
-
-
-@router.get("/version")
-def get_version():
-    return {"version": __version__}
 
 
 @router.get("/resolutions")
@@ -218,3 +212,8 @@ def download_file(job_id: str):
     orig = Path(job["input_name"])
     download_name = f"{orig.stem}_{job['resolution']}.mp4"
     return FileResponse(path=output_path, filename=download_name, media_type="video/mp4")
+
+
+@router.get("/version")
+def get_version():
+    return {"version": __version__}

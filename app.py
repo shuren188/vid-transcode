@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """FastAPI application entry point for vid-transcode web app."""
 
+import asyncio
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
@@ -9,12 +11,26 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from vid_transcode.api import router as api_router
+from vid_transcode.api import cleanup_task_runner, router as api_router
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Start background tasks on boot, clean up on shutdown."""
+    cleanup_task = asyncio.create_task(cleanup_task_runner())
+    yield
+    cleanup_task.cancel()
+    try:
+        await cleanup_task
+    except asyncio.CancelledError:
+        pass
+
 
 app = FastAPI(
     title="vid-transcode",
     description="Video transcoding web app - convert videos to H.264 MP4",
-    version="0.1.0",
+    version="0.1.5",
+    lifespan=lifespan,
 )
 
 # CORS - allow dev frontend on different port
@@ -36,9 +52,10 @@ if FRONTEND_BUILD.is_dir():
 
 
 def main() -> None:
+    """Run the dev server."""
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "8000"))
-    uvicorn.run("app:app", host=host, port=port, reload=True)
+    uvicorn.run("app:app", host=host, port=port, reload=False)
 
 
 if __name__ == "__main__":

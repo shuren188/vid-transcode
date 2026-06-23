@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import subprocess
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +28,10 @@ RESOLUTION_PRESETS = {
     "720p":  {"height": 720,  "width": 1280, "label": "720p (HD)"},
     "1080p": {"height": 1080, "width": 1920, "label": "1080p (Full HD)"},
 }
+
+# Limits
+MAX_FILE_SIZE = 500 * 1024 * 1024  # 500 MB
+_concurrency_sem = asyncio.Semaphore(1)  # Only 1 transcode at a time (free tier)
 
 # In-memory job store
 # Each value is a dict: {job_id, status, progress, input_name, resolution, ...}
@@ -60,9 +64,6 @@ class JobStatus(BaseModel):
     error: Optional[str] = None
     created_at: str
     completed_at: Optional[str] = None
-    output_width: Optional[int] = None
-    output_height: Optional[int] = None
-    output_codec: Optional[str] = None
 
 
 def _get_video_duration(input_path: Path) -> float:
@@ -82,68 +83,92 @@ async def _run_transcode(job_id: str) -> None:
     target_height = preset["height"]
     target_width = preset["width"]
 
-    bs = "\\"
+    # ── Build display‑aspect‑ratio–aware scale + square pixels ──
     scale_filter = (
-        f"scale=min({target_width}{bs},iw):min({target_height}{bs},ih)"
-        ":force_original_aspect_ratio=decrease"
+        f"scale=min({target_width},iw):min({target_height},ih)"
+        ":force_original_aspect_ratio=decrease,setsar=1"
     )
+
+    # H.264 level per resolution — conservative for max compatibility
+    level_map = {"480p": "3.0", "720p": "3.1", "1080p": "4.0"}
+    h264_level = level_map[resolution]
 
     cmd = [
         "ffmpeg", "-y",
         "-i", str(input_path),
+        # ── Video ──
         "-c:v", "libx264",
+        "-profile:v", "high",
+        "-level:v", h264_level,
         "-preset", "medium",
         "-crf", "23",
         "-vf", scale_filter,
         "-pix_fmt", "yuv420p",
+        "-colorspace", "bt709",
+        "-color_primaries", "bt709",
+        "-color_trc", "bt709",
+        "-color_range", "tv",
         "-movflags", "+faststart",
+        "-tag:v", "avc1",
+        # ── Strip metadata & chapters ──
+        "-map_metadata", "-1",
+        "-map_chapters", "-1",
+        # ── Clean timeline ──
+        "-fflags", "+genpts",
+        "-avoid_negative_ts", "make_zero",
+        # ── GOP / keyframe settings ──
+        "-g", "48",
+        "-keyint_min", "12",
+        # ── Audio ──
         "-c:a", "aac",
+        "-ar", "44100",
+        "-ac", "2",
         "-b:a", "128k",
+        # ── Progress ──
         "-progress", "pipe:1",
         "-nostats",
         str(output_path),
     ]
 
-    try:
-        job["status"] = "processing"
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        assert proc.stdout is not None
-        async for line_bytes in proc.stdout:
-            line = line_bytes.decode("utf-8", errors="replace").strip()
-            if line.startswith("out_time_us="):
-                try:
-                    us = int(line.split("=", 1)[1])
-                    elapsed_s = us / 1_000_000
-                    if total_duration > 0:
-                        job["progress"] = min(round((elapsed_s / total_duration) * 100, 1), 99.9)
-                except (ValueError, IndexError):
-                    pass
-        await proc.wait()
-        if proc.returncode != 0:
-            stderr_out = (await proc.stderr.read()).decode("utf-8", errors="replace")
-            raise RuntimeError(f"FFmpeg error (exit {proc.returncode}):\n{stderr_out[-2000:]}")
-        job["status"] = "completed"
-        job["progress"] = 100.0
-        job["completed_at"] = datetime.now(timezone.utc).isoformat()
-        if output_path.exists():
-            job["output_size_mb"] = round(output_path.stat().st_size / (1024 * 1024), 2)
-            job["output_filename"] = output_path.name
-            try:
-                out_video = VideoInfo(output_path)
-                job["output_width"] = out_video.width
-                job["output_height"] = out_video.height
-                job["output_codec"] = out_video.codec
-            except:
-                pass
-    except Exception as exc:
-        job["status"] = "failed"
-        job["error"] = str(exc)
-        job["progress"] = 0.0
+    async with _concurrency_sem:
+        try:
+            job["status"] = "processing"
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            assert proc.stdout is not None
+            async for line_bytes in proc.stdout:
+                line = line_bytes.decode("utf-8", errors="replace").strip()
+                if line.startswith("out_time_us="):
+                    try:
+                        us = int(line.split("=", 1)[1])
+                        elapsed_s = us / 1_000_000
+                        if total_duration > 0:
+                            job["progress"] = min(round((elapsed_s / total_duration) * 100, 1), 99.9)
+                    except (ValueError, IndexError):
+                        pass
+            await proc.wait()
+            if proc.returncode != 0:
+                stderr_out = (await proc.stderr.read()).decode("utf-8", errors="replace")
+                raise RuntimeError(f"FFmpeg error (exit {proc.returncode}):\n{stderr_out[-2000:]}")
+            job["status"] = "completed"
+            job["progress"] = 100.0
+            job["completed_at"] = datetime.now(timezone.utc).isoformat()
+            if output_path.exists():
+                job["output_size_mb"] = round(output_path.stat().st_size / (1024 * 1024), 2)
+                job["output_filename"] = output_path.name
+        except Exception as exc:
+            job["status"] = "failed"
+            job["error"] = str(exc)
+            job["progress"] = 0.0
 
 
 router = APIRouter(prefix="/api")
+
+
+@router.get("/version")
+def get_version():
+    return {"version": __version__}
 
 
 @router.get("/resolutions")
@@ -162,8 +187,15 @@ async def upload_video(file: UploadFile = File(...)):
     file_id = str(uuid.uuid4())
     safe_name = f"{file_id}{ext}"
     dest = UPLOAD_DIR / safe_name
-    content = await file.read()
-    dest.write_bytes(content)
+    # Stream-write in chunks to avoid OOM on large files
+    total_bytes = 0
+    with dest.open("wb") as f:
+        while chunk := await file.read(8 * 1024 * 1024):
+            total_bytes += len(chunk)
+            if total_bytes > MAX_FILE_SIZE:
+                dest.unlink(missing_ok=True)
+                raise HTTPException(413, f"File too large (max {MAX_FILE_SIZE // (1024*1024)}MB)")
+            f.write(chunk)
     try:
         info = VideoInfo(dest)
     except Exception as e:
@@ -225,6 +257,24 @@ def download_file(job_id: str):
     return FileResponse(path=output_path, filename=download_name, media_type="video/mp4")
 
 
-@router.get("/version")
-def get_version():
-    return {"version": __version__}
+async def cleanup_task_runner() -> None:
+    """Periodically purge files & stale job records older than 2 hours."""
+    while True:
+        await asyncio.sleep(3600)
+        cutoff = time.time() - 7200
+        # Clean up uploaded / transcoded files
+        for d in (UPLOAD_DIR, OUTPUT_DIR):
+            if d.is_dir():
+                for f in d.iterdir():
+                    if f.is_file() and f.stat().st_mtime < cutoff:
+                        f.unlink(missing_ok=True)
+        # Clean up completed / failed job records
+        for job_id, job in list(_jobs.items()):
+            completed_at = job.get("completed_at")
+            if completed_at:
+                try:
+                    ts = datetime.fromisoformat(completed_at).timestamp()
+                    if ts < cutoff:
+                        del _jobs[job_id]
+                except (ValueError, TypeError):
+                    pass

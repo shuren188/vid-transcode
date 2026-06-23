@@ -86,9 +86,12 @@ async def _run_transcode(job_id: str) -> None:
     # ── Build display‑aspect‑ratio–aware scale + square pixels ──
     # FFmpeg v5.x filter graph parser treats commas inside min()
     # as filter chain separators unless escaped with backslash.
+    # Two-pass scale: first shrink to fit bounds, then ensure even
+    # dimensions (libx264 + yuv420p requires even width/height).
     scale_filter = (
         f"scale=min({target_width}\\,iw):min({target_height}\\,ih)"
-        ":force_original_aspect_ratio=decrease,setsar=1"
+        ":force_original_aspect_ratio=decrease,"
+        "scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1"
     )
 
     # H.264 level per resolution — conservative for max compatibility

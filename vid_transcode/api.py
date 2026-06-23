@@ -83,20 +83,22 @@ async def _run_transcode(job_id: str) -> None:
     target_height = preset["height"]
     target_width = preset["width"]
 
-    # ── Build display‑aspect‑ratio–aware scale + square pixels ──
-    # FFmpeg v5.x filter graph parser treats commas inside min()
-    # as filter chain separators unless escaped with backslash.
-    # Two-pass scale: first shrink to fit bounds, then ensure even
-    # dimensions (libx264 + yuv420p requires even width/height).
+    # ── Build scale filter chain ──
+    # 1. fps=30 caps frame rate (千牛 rejects >30fps)
+    # 2. min(x,iw):min(y,ih) shrinks while preserving aspect
+    # 3. trunc(iw/2)*2 ensures even pixels for libx264+yuv420p
+    # Note: commas inside min() must be escaped for FFmpeg v5.x
     scale_filter = (
+        "fps=30,"
         f"scale=min({target_width}\\,iw):min({target_height}\\,ih)"
         ":force_original_aspect_ratio=decrease,"
         "scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1"
     )
 
-    # H.264 level per resolution — conservative for max compatibility
-    level_map = {"480p": "3.0", "720p": "3.1", "1080p": "4.0"}
-    h264_level = level_map[resolution]
+    # H.264 Level is left unset → x264 auto-selects the appropriate
+    # level for the stream parameters (fps, resolution, bitrate).
+    # Hardcoding levels that are too low for >30fps video causes
+    # SPS/decoder mismatch → 千牛 rejection.
 
     cmd = [
         "ffmpeg", "-y",
@@ -104,7 +106,6 @@ async def _run_transcode(job_id: str) -> None:
         # ── Video ──
         "-c:v", "libx264",
         "-profile:v", "high",
-        "-level:v", h264_level,
         "-preset", "veryfast",
         "-crf", "23",
         "-threads", "2",
@@ -120,8 +121,8 @@ async def _run_transcode(job_id: str) -> None:
         # ── Strip metadata & chapters ──
         "-map_metadata", "-1",
         "-map_chapters", "-1",
-        # ── Clean timeline ──
-        "-fflags", "+genpts",
+        # ── Clean timeline (no +genpts — creates edit lists
+        # that some platforms, including 千牛, reject) ──
         "-avoid_negative_ts", "make_zero",
         # ── GOP / keyframe settings ──
         "-g", "48",

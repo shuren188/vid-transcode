@@ -78,14 +78,16 @@ async def _run_transcode(job_id: str) -> None:
     output_path = job["output_path"]
     total_duration = job.get("total_duration", 0.0)
 
-    # ── 第一版原始转码命令 ──
-    # 还原初始版本的最简编码参数，去掉了所有后来加的参数
+    # ── 第一版原始转码参数 + Render稳定性修复 ──
+    # 编码参数完全还原第一版（纯libx264 crf23 preset medium），
+    # 仅保留 Render 512MB 环境下必需的内存限制参数
     cmd = [
         "ffmpeg", "-y",
         "-i", str(input_path),
         "-c:v", "libx264",
         "-preset", "medium",
         "-crf", "23",
+        "-threads", "2",
         "-pix_fmt", "yuv420p",
         "-movflags", "+faststart",
         "-c:a", "aac",

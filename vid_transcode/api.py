@@ -77,54 +77,36 @@ async def _run_transcode(job_id: str) -> None:
     output_path = job["output_path"]
     total_duration = job.get("total_duration", 0.0)
 
-    # Build filter chain:
-    # 1. fps=30  — cap frame rate (千牛 rejects >30fps)
-    # 2. scale to even dimensions (libx264 + yuv420p requires even w/h)
-    #    Keep original resolution — no downscaling.
-    #    If resolution < 720p, upscale to 720p (meet 千牛 minimum).
-    filter_parts = ["fps=30"]
-    # Ensure even dimensions
-    filter_parts.append("scale=trunc(iw/2)*2:trunc(ih/2)*2")
-    filter_parts.append("setsar=1")
-    vf = ",".join(filter_parts)
+    # ── 滤镜子句 ──
+    # 1. fps=30 — 千牛拒绝 >30fps 的视频
+    # 2. trunc(iw/2)*2 — yuv420p 需要偶数宽高
+    # 3. setsar=1 — 正方形像素
+    vf = "fps=30,scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1"
 
-    # Bitrate targets to meet 千牛 minimum > 0.56 Mbps
-    # Use 2-pass like approach with CRF + maxrate/minrate constraints
-    # CRF 20 gives good quality; minrate ensures 千牛 requirement.
-    # maxrate/bufsize allow VBV for streaming compliance.
+    # ── 标准 H.264 编码参数（对齐剪映导出效果）──
     cmd = [
         "ffmpeg", "-y",
         "-i", str(input_path),
-        # ── Video ──
+        # ── 视频 ──
         "-c:v", "libx264",
         "-profile:v", "high",
         "-level:v", "4.0",
-        "-preset", "veryfast",
-        # CBR: 强制恒定码率确保千牛平均码率 >560 Kbps 要求
-        "-b:v", "1000k",
-        "-minrate", "1000k",
-        "-maxrate", "1000k",
-        "-bufsize", "1000k",
-        "-x264-params", "nal-hrd=cbr:keyint=60:min-keyint=15",
+        "-preset", "medium",
+        "-crf", "18",
         "-threads", "2",
         "-vf", vf,
         "-pix_fmt", "yuv420p",
-        "-colorspace", "bt709",
-        "-color_primaries", "bt709",
-        "-color_trc", "bt709",
-        "-color_range", "tv",
         "-movflags", "+faststart",
-        "-max_muxing_queue_size", "1024",
         "-tag:v", "avc1",
-        # ── Strip metadata & chapters ──
+        # ── 清理元数据 ──
         "-map_metadata", "-1",
         "-map_chapters", "-1",
-        # ── Audio (AAC, ≤128k) ──
+        # ── 音频 ──
         "-c:a", "aac",
         "-ar", "44100",
         "-ac", "2",
         "-b:a", "128k",
-        # ── Progress ──
+        # ── 进度输出 ──
         "-progress", "pipe:1",
         "-nostats",
         str(output_path),

@@ -100,11 +100,12 @@ async def _run_transcode(job_id: str) -> None:
         "-profile:v", "high",
         "-level:v", "4.0",
         "-preset", "veryfast",
-        # CBR-like: force minimum bitrate for 千牛 (>560 kbps)
+        # CBR: 强制恒定码率确保千牛平均码率 >560 Kbps 要求
         "-b:v", "1000k",
-        "-minrate", "800k",
-        "-maxrate", "1500k",
-        "-bufsize", "2000k",
+        "-minrate", "1000k",
+        "-maxrate", "1000k",
+        "-bufsize", "1000k",
+        "-x264-params", "nal-hrd=cbr:keyint=60:min-keyint=15",
         "-threads", "2",
         "-vf", vf,
         "-pix_fmt", "yuv420p",
@@ -118,9 +119,6 @@ async def _run_transcode(job_id: str) -> None:
         # ── Strip metadata & chapters ──
         "-map_metadata", "-1",
         "-map_chapters", "-1",
-        # ── GOP / keyframe ~2s ──
-        "-g", "60",
-        "-keyint_min", "15",
         # ── Audio (AAC, ≤128k) ──
         "-c:a", "aac",
         "-ar", "44100",

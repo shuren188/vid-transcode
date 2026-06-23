@@ -85,16 +85,12 @@ async def _run_transcode(job_id: str) -> None:
     vf = "fps=30,scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1"
 
     # ── 千牛兼容 H.264 编码 ──
-    # 使用最标准参数产生100%兼容MP4
-    scale_filter = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
-    vf = "fps=30,scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1"
     cmd = [
         "ffmpeg", "-y",
         "-i", str(input_path),
         "-c:v", "libx264",
         "-profile:v", "high",
-        "-level:v", "4.0",
-        "-preset", "medium",
+        "-preset", "fast",
         "-crf", "18",
         "-threads", "2",
         "-vf", vf,

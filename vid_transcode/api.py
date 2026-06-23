@@ -84,8 +84,10 @@ async def _run_transcode(job_id: str) -> None:
     target_width = preset["width"]
 
     # ── Build display‑aspect‑ratio–aware scale + square pixels ──
+    # FFmpeg v5.x filter graph parser treats commas inside parentheses
+    # as filter chain separators — must escape with backslash.
     scale_filter = (
-        f"scale=min({target_width},iw):min({target_height},ih)"
+        f"scale=min({target_width}\\,iw):min({target_height}\\,ih)"
         ":force_original_aspect_ratio=decrease,setsar=1"
     )
 

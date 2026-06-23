@@ -60,6 +60,9 @@ class JobStatus(BaseModel):
     error: Optional[str] = None
     created_at: str
     completed_at: Optional[str] = None
+    output_width: Optional[int] = None
+    output_height: Optional[int] = None
+    output_codec: Optional[str] = None
 
 
 def _get_video_duration(input_path: Path) -> float:
@@ -127,6 +130,13 @@ async def _run_transcode(job_id: str) -> None:
         if output_path.exists():
             job["output_size_mb"] = round(output_path.stat().st_size / (1024 * 1024), 2)
             job["output_filename"] = output_path.name
+            try:
+                out_video = VideoInfo(output_path)
+                job["output_width"] = out_video.width
+                job["output_height"] = out_video.height
+                job["output_codec"] = out_video.codec
+            except:
+                pass
     except Exception as exc:
         job["status"] = "failed"
         job["error"] = str(exc)

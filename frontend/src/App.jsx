@@ -135,7 +135,7 @@ export default function App() {
                 <span className="file-meta">{fileInfo.width}&#215;{fileInfo.height} &#183; {formatDuration(fileInfo.duration)} &#183; {formatSize(fileInfo.size_mb)} &#183; {fileInfo.codec || "?"}</span>
               </div>
             </div>
-            <p className="ready-hint">&#23558;&#20197;&#21407;&#22987;&#20998;&#36776;&#29575;&#36716;&#30721;&#20026; H.264 &#65292;&#36914;&#34892;&#21315;&#29275;&#20860;&#23481;&#21319;&#32423;</p>
+            <p className="ready-hint">拼多多视频转码专用</p>
             <button className="btn-primary" onClick={startTranscode}>
               <span>&#24320;&#22987;&#36716;&#30721;</span>
               <svg className="btn-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3" /></svg>
@@ -179,7 +179,7 @@ export default function App() {
           </section>
         )}
       </main>
-      <footer className="footer"><p>vid-transcode v0.2.2 &#183; &#22522;&#20110; FFmpeg &#183; H.264 / AVC</p></footer>
+      <footer className="footer"><p>vid-transcode v0.2.3 &#183; &#22522;&#20110; FFmpeg &#183; H.264 / AVC</p></footer>
     </div>
   );
 }

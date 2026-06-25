@@ -78,24 +78,11 @@ async def _run_transcode(job_id: str) -> None:
     output_path = job["output_path"]
     total_duration = job.get("total_duration", 0.0)
 
-    # ── 拼多多兼容编码（全面修复）──
-    # 行车记录仪/摄像头视频导致拼多多转码失败的原因:
-    # 1. 分辨率>1080p → 拼多多解码器不支持
-    # 2. H.264 Level过高(>4.0) → 拼多多旧版本FFmpeg不兼容
-    # 3. x264 SEI元数据 → 部分平台拒绝含x264标识的视频
-    # 4. 非标像素宽高比(SAR≠1) → DAR计算错误
-    # 5. 可变帧率(VFR) → 时间戳异常
-    # 6. GPS/品牌元数据 → 非标准数据
-    #
-    # 剪映导出的视频可以上传，原因:
-    # - 限制分辨率≤1080p
-    # - 使用标准Level 4.0
-    # - 无SEI/usertag数据
-    #
-    # 解决策略: 全面标准化
+    # ── 拼多多兼容编码（确保有音频轨）──
+    # 很多平台(包括拼多多)的转码器遇到无音轨视频会崩溃。
+    # 强制添加一条静音AAC音轨，确保平台转码流程正常。
     target_w = 1920
     target_h = 1080
-    # FFmpeg v5.x: min()内的逗号必须转义
     scale = f"scale=min({target_w}\\,iw):min({target_h}\\,ih)"
     vf = (
         f"fps=30,"
@@ -105,7 +92,10 @@ async def _run_transcode(job_id: str) -> None:
     cmd = [
         "ffmpeg", "-y",
         "-i", str(input_path),
+        # 生成静音音频轨
+        "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
         # ── 视频 ──
+        "-map", "0:v:0",
         "-c:v", "libx264",
         "-profile:v", "main",
         "-level:v", "4.0",
@@ -115,16 +105,18 @@ async def _run_transcode(job_id: str) -> None:
         "-vf", vf,
         "-pix_fmt", "yuv420p",
         "-movflags", "+faststart",
-        # ── 清理x264 SEI和元数据 ──
-        "-bsf:v", "filter_units=remove_types=6",   # 移除SEI NAL单元(含x264标识)
+        # ── 清理SEI和元数据 ──
+        "-bsf:v", "filter_units=remove_types=6",
         "-map_metadata", "-1",
         "-map_chapters", "-1",
-        # ── 音频 ──
+        # ── 音频：用生成的静音轨 ──
+        "-map", "1:a:0",
         "-c:a", "aac",
-        "-b:a", "128k",
+        "-b:a", "64k",
         "-ar", "44100",
         "-ac", "2",
-        # ── 进度 ──
+        # 以视频长度为准
+        "-shortest",
         "-progress", "pipe:1",
         "-nostats",
         str(output_path),
